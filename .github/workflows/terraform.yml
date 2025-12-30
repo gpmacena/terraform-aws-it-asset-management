@@ -9,19 +9,26 @@ on:
         description: 'Ação a realizar (apply ou destroy)'
         required: true
         default: 'apply'
+        type: choice
+        options:
+          - apply
+          - destroy
       environment:
-        description: 'Ambiente (dev ou prod)'
+        description: 'Ambiente alvo'
         required: true
         default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
 
 jobs:
   terraform:
     name: "Infrastructure"
     runs-on: ubuntu-latest
-    # Seleciona o ambiente do GitHub (Settings > Environments)
-    environment: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'development') }}
+    # Governança: Se for prod, usa o environment 'production' que pode ter aprovação manual
+    environment: ${{ (github.event.inputs.environment == 'prod' || github.ref == 'refs/heads/main') && 'production' || 'development' }}
     
-    # Define o que este job vai "exportar" para o próximo
     outputs:
       vm_ip: ${{ steps.set-ip.outputs.VM_IP }}
 
@@ -38,7 +45,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_wrapper: false # Necessário para conseguir capturar outputs via CLI
+          terraform_wrapper: false
 
       - name: Terraform Init
         run: cd terraform && terraform init
@@ -48,31 +55,43 @@ jobs:
           cd terraform
           terraform workspace select ${{ env.ENV_NAME }} || terraform workspace new ${{ env.ENV_NAME }}
 
-      - name: Terraform Action (Apply/Destroy)
+      # GOVERNANÇA: Trava de segurança para impedir destroy acidental em PROD via automação de push
+      - name: "Governance Check: Destroy"
+        if: github.event.inputs.action == 'destroy'
+        run: |
+          echo "Solicitação de DESTROY detectada para o ambiente: ${{ env.ENV_NAME }}"
+          if [ "${{ env.ENV_NAME }}" == "prod" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "ERRO: Destroy em PROD só é permitido via execução manual (workflow_dispatch)."
+            exit 1
+          fi
+
+      - name: Terraform Destroy
+        if: github.event.inputs.action == 'destroy'
         run: |
           cd terraform
-          if [ "${{ github.event.inputs.action }}" == "destroy" ]; then
-            terraform destroy -var="environment=${{ env.ENV_NAME }}" -var-file="environments/${{ env.ENV_NAME }}.tfvars" -auto-approve
-          else
-            terraform apply -var="environment=${{ env.ENV_NAME }}" -var-file="environments/${{ env.ENV_NAME }}.tfvars" -auto-approve
-          fi
+          terraform destroy -var="environment=${{ env.ENV_NAME }}" -var-file="environments/${{ env.ENV_NAME }}.tfvars" -auto-approve
+
+      - name: Terraform Apply
+        if: github.event.inputs.action != 'destroy'
+        run: |
+          cd terraform
+          terraform apply -var="environment=${{ env.ENV_NAME }}" -var-file="environments/${{ env.ENV_NAME }}.tfvars" -auto-approve
 
       - name: Export VM IP
         id: set-ip
         if: github.event.inputs.action != 'destroy'
         run: |
           cd terraform
-          # Usando 'public_ip' para bater com o seu arquivo outputs.tf
           IP=$(terraform output -raw public_ip)
           echo "VM_IP=$IP" >> $GITHUB_OUTPUT
 
   deploy-app:
     name: "Deploy Application"
     needs: terraform
-    # Só executa se não for um destroy e se o IP foi capturado
+    # Não roda deploy se a ação for destroy
     if: github.event.inputs.action != 'destroy' && needs.terraform.outputs.vm_ip != ''
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'development') }}
+    environment: ${{ (github.event.inputs.environment == 'prod' || github.ref == 'refs/heads/main') && 'production' || 'development' }}
     
     env:
       ENV_NAME: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'prod' || 'dev') }}
@@ -101,15 +120,10 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ needs.terraform.outputs.vm_ip }}
-          username: ubuntu # Usuário padrão da AWS, mude se usar outra distro
+          username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # Atualiza a imagem e reinicia o container
             sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/asset-commander:${{ env.ENV_NAME }}
             sudo docker stop asset-dashboard || true
             sudo docker rm asset-dashboard || true
-            sudo docker run -d \
-              --name asset-dashboard \
-              --restart always \
-              -p 80:80 \
-              ${{ secrets.DOCKERHUB_USERNAME }}/asset-commander:${{ env.ENV_NAME }}
+            sudo docker run -d --name asset-dashboard --restart always -p 80:80 ${{ secrets.DOCKERHUB_USERNAME }}/asset-commander:${{ env.ENV_NAME }}
