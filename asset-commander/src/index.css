@@ -1,0 +1,186 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* DevOps Terminal Theme - Dark Mode Design System */
+
+@layer base {
+  :root {
+    --background: 220 20% 10%;
+    --foreground: 160 60% 90%;
+
+    --card: 220 20% 13%;
+    --card-foreground: 160 60% 90%;
+
+    --popover: 220 20% 13%;
+    --popover-foreground: 160 60% 90%;
+
+    --primary: 142 70% 45%;
+    --primary-foreground: 220 20% 10%;
+
+    --secondary: 220 15% 20%;
+    --secondary-foreground: 160 60% 90%;
+
+    --muted: 220 15% 18%;
+    --muted-foreground: 220 10% 55%;
+
+    --accent: 199 89% 48%;
+    --accent-foreground: 220 20% 10%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --warning: 45 93% 47%;
+    --warning-foreground: 220 20% 10%;
+
+    --success: 142 70% 45%;
+    --success-foreground: 220 20% 10%;
+
+    --border: 220 15% 22%;
+    --input: 220 15% 18%;
+    --ring: 142 70% 45%;
+
+    --radius: 0.375rem;
+
+    /* DevOps specific tokens */
+    --terminal-green: 142 70% 45%;
+    --terminal-cyan: 199 89% 48%;
+    --terminal-yellow: 45 93% 47%;
+    --terminal-red: 0 72% 51%;
+    --terminal-purple: 270 60% 60%;
+    
+    /* Gradients */
+    --gradient-terminal: linear-gradient(135deg, hsl(142 70% 45% / 0.15), hsl(199 89% 48% / 0.1));
+    --gradient-card: linear-gradient(180deg, hsl(220 20% 15%), hsl(220 20% 12%));
+    
+    /* Shadows */
+    --shadow-glow: 0 0 20px hsl(142 70% 45% / 0.2);
+    --shadow-card: 0 4px 24px hsl(0 0% 0% / 0.4);
+
+    --sidebar-background: 220 20% 8%;
+    --sidebar-foreground: 160 60% 90%;
+    --sidebar-primary: 142 70% 45%;
+    --sidebar-primary-foreground: 220 20% 10%;
+    --sidebar-accent: 220 15% 15%;
+    --sidebar-accent-foreground: 160 60% 90%;
+    --sidebar-border: 220 15% 18%;
+    --sidebar-ring: 142 70% 45%;
+  }
+
+  .dark {
+    --background: 220 20% 10%;
+    --foreground: 160 60% 90%;
+    --card: 220 20% 13%;
+    --card-foreground: 160 60% 90%;
+    --popover: 220 20% 13%;
+    --popover-foreground: 160 60% 90%;
+    --primary: 142 70% 45%;
+    --primary-foreground: 220 20% 10%;
+    --secondary: 220 15% 20%;
+    --secondary-foreground: 160 60% 90%;
+    --muted: 220 15% 18%;
+    --muted-foreground: 220 10% 55%;
+    --accent: 199 89% 48%;
+    --accent-foreground: 220 20% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 15% 22%;
+    --input: 220 15% 18%;
+    --ring: 142 70% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  code, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+@layer components {
+  .terminal-card {
+    @apply bg-card border border-border rounded-md;
+    background: var(--gradient-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .terminal-glow {
+    box-shadow: var(--shadow-glow);
+  }
+
+  .status-online {
+    @apply text-primary;
+    text-shadow: 0 0 8px hsl(var(--terminal-green) / 0.6);
+  }
+
+  .status-offline {
+    @apply text-destructive;
+    text-shadow: 0 0 8px hsl(var(--terminal-red) / 0.6);
+  }
+
+  .metric-value {
+    font-family: 'JetBrains Mono', monospace;
+    @apply text-primary font-bold;
+  }
+
+  .pulse-dot {
+    @apply w-2 h-2 rounded-full bg-primary;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+
+  .scanline {
+    background: linear-gradient(
+      to bottom,
+      transparent 0%,
+      hsl(142 70% 45% / 0.03) 50%,
+      transparent 100%
+    );
+    background-size: 100% 4px;
+    pointer-events: none;
+  }
+}
+
+@layer utilities {
+  .text-terminal-green {
+    color: hsl(var(--terminal-green));
+  }
+  
+  .text-terminal-cyan {
+    color: hsl(var(--terminal-cyan));
+  }
+  
+  .text-terminal-yellow {
+    color: hsl(var(--terminal-yellow));
+  }
+  
+  .text-terminal-red {
+    color: hsl(var(--terminal-red));
+  }
+
+  .bg-terminal-green {
+    background-color: hsl(var(--terminal-green));
+  }
+
+  .border-terminal-green {
+    border-color: hsl(var(--terminal-green));
+  }
+}

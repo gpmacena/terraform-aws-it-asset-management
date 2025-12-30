@@ -1,0 +1,115 @@
+name: "Terraform & App Deployment"
+
+on:
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Ação a realizar (apply ou destroy)'
+        required: true
+        default: 'apply'
+      environment:
+        description: 'Ambiente (dev ou prod)'
+        required: true
+        default: 'dev'
+
+jobs:
+  terraform:
+    name: "Infrastructure"
+    runs-on: ubuntu-latest
+    # Seleciona o ambiente do GitHub (Settings > Environments)
+    environment: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'development') }}
+    
+    # Define o que este job vai "exportar" para o próximo
+    outputs:
+      vm_ip: ${{ steps.set-ip.outputs.VM_IP }}
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: "sa-east-1"
+      ENV_NAME: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'prod' || 'dev') }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false # Necessário para conseguir capturar outputs via CLI
+
+      - name: Terraform Init
+        run: cd terraform && terraform init
+
+      - name: Terraform Workspace Select
+        run: |
+          cd terraform
+          terraform workspace select ${{ env.ENV_NAME }} || terraform workspace new ${{ env.ENV_NAME }}
+
+      - name: Terraform Action (Apply/Destroy)
+        run: |
+          cd terraform
+          if [ "${{ github.event.inputs.action }}" == "destroy" ]; then
+            terraform destroy -var="environment=${{ env.ENV_NAME }}" -var-file="environments/${{ env.ENV_NAME }}.tfvars" -auto-approve
+          else
+            terraform apply -var="environment=${{ env.ENV_NAME }}" -var-file="environments/${{ env.ENV_NAME }}.tfvars" -auto-approve
+          fi
+
+      - name: Export VM IP
+        id: set-ip
+        if: github.event.inputs.action != 'destroy'
+        run: |
+          cd terraform
+          # Usando 'public_ip' para bater com o seu arquivo outputs.tf
+          IP=$(terraform output -raw public_ip)
+          echo "VM_IP=$IP" >> $GITHUB_OUTPUT
+
+  deploy-app:
+    name: "Deploy Application"
+    needs: terraform
+    # Só executa se não for um destroy e se o IP foi capturado
+    if: github.event.inputs.action != 'destroy' && needs.terraform.outputs.vm_ip != ''
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'development') }}
+    
+    env:
+      ENV_NAME: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'prod' || 'dev') }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./asset-commander
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/asset-commander:${{ env.ENV_NAME }}
+          build-args: |
+            VITE_API_BASE_URL=${{ secrets.API_URL }}
+            VITE_USE_MOCK_DATA=false
+
+      - name: Deploy to VM via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ needs.terraform.outputs.vm_ip }}
+          username: ubuntu # Usuário padrão da AWS, mude se usar outra distro
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Atualiza a imagem e reinicia o container
+            sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/asset-commander:${{ env.ENV_NAME }}
+            sudo docker stop asset-dashboard || true
+            sudo docker rm asset-dashboard || true
+            sudo docker run -d \
+              --name asset-dashboard \
+              --restart always \
+              -p 80:80 \
+              ${{ secrets.DOCKERHUB_USERNAME }}/asset-commander:${{ env.ENV_NAME }}
