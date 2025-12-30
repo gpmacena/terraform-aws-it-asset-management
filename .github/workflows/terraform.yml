@@ -1,8 +1,9 @@
-name: "Terraform & App Deployment"
+name: "Terraform Enterprise Governance & App Deploy"
 
 on:
   push:
     branches: [ main, develop ]
+  # Este bloco habilita o botão "Run workflow" com as opções de escolha
   workflow_dispatch:
     inputs:
       action:
@@ -14,7 +15,7 @@ on:
           - apply
           - destroy
       environment:
-        description: 'Ambiente alvo'
+        description: 'Ambiente (dev ou prod)'
         required: true
         default: 'dev'
         type: choice
@@ -24,11 +25,12 @@ on:
 
 jobs:
   terraform:
-    name: "Infrastructure"
+    name: "Infrastructure: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'prod' || 'dev') }}"
     runs-on: ubuntu-latest
-    # Governança: Se for prod, usa o environment 'production' que pode ter aprovação manual
-    environment: ${{ (github.event.inputs.environment == 'prod' || github.ref == 'refs/heads/main') && 'production' || 'development' }}
     
+    # Gerenciamento de Ambientes no GitHub (onde ficam as Secrets)
+    environment: ${{ (github.event.inputs.environment == 'prod' || github.ref == 'refs/heads/main') && 'production' || 'development' }}
+
     outputs:
       vm_ip: ${{ steps.set-ip.outputs.VM_IP }}
 
@@ -55,41 +57,33 @@ jobs:
           cd terraform
           terraform workspace select ${{ env.ENV_NAME }} || terraform workspace new ${{ env.ENV_NAME }}
 
-      # GOVERNANÇA: Trava de segurança para impedir destroy acidental em PROD via automação de push
-      - name: "Governance Check: Destroy"
-        if: github.event.inputs.action == 'destroy'
-        run: |
-          echo "Solicitação de DESTROY detectada para o ambiente: ${{ env.ENV_NAME }}"
-          if [ "${{ env.ENV_NAME }}" == "prod" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
-            echo "ERRO: Destroy em PROD só é permitido via execução manual (workflow_dispatch)."
-            exit 1
-          fi
-
+      # AÇÃO 1: DESTROY (Somente se selecionado manualmente)
       - name: Terraform Destroy
         if: github.event.inputs.action == 'destroy'
         run: |
           cd terraform
           terraform destroy -var="environment=${{ env.ENV_NAME }}" -var-file="environments/${{ env.ENV_NAME }}.tfvars" -auto-approve
 
+      # AÇÃO 2: APPLY (Padrão para push ou seleção manual)
       - name: Terraform Apply
         if: github.event.inputs.action != 'destroy'
         run: |
           cd terraform
           terraform apply -var="environment=${{ env.ENV_NAME }}" -var-file="environments/${{ env.ENV_NAME }}.tfvars" -auto-approve
 
+      # Captura o IP para o próximo Job de Deploy
       - name: Export VM IP
         id: set-ip
         if: github.event.inputs.action != 'destroy'
         run: |
           cd terraform
-          IP=$(terraform output -raw public_ip)
-          echo "VM_IP=$IP" >> $GITHUB_OUTPUT
+          echo "VM_IP=$(terraform output -raw public_ip)" >> $GITHUB_OUTPUT
 
   deploy-app:
-    name: "Deploy Application"
+    name: "Application Deployment"
     needs: terraform
-    # Não roda deploy se a ação for destroy
-    if: github.event.inputs.action != 'destroy' && needs.terraform.outputs.vm_ip != ''
+    # Não tenta fazer deploy se a ação foi "destroy"
+    if: github.event.inputs.action != 'destroy'
     runs-on: ubuntu-latest
     environment: ${{ (github.event.inputs.environment == 'prod' || github.ref == 'refs/heads/main') && 'production' || 'development' }}
     
@@ -116,7 +110,7 @@ jobs:
             VITE_API_BASE_URL=${{ secrets.API_URL }}
             VITE_USE_MOCK_DATA=false
 
-      - name: Deploy to VM via SSH
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ needs.terraform.outputs.vm_ip }}
